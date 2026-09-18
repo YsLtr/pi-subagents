@@ -32,11 +32,14 @@ export interface OverlayItem {
 	modelRef?: string;
 	status?: string;
 	statusColor?: string;
+	enabled?: boolean;
 	stats: string[];
 	activity: string;
 	detailSections: DetailSection[];
 	canKill: boolean;
 	canResume: boolean;
+	canToggle?: boolean;
+	onToggle?: () => void;
 	sessionFile?: string;
 	onKill?: () => Promise<void>;
 }

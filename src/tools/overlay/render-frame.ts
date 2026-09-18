@@ -78,6 +78,10 @@ export function getFooterHints(state: OverlayState): FooterHint[] {
 	if (state.activeTab === "completed" && state.items.length > 0) {
 		hints.push({ key: "m", action: "resume" });
 	}
+	if (state.activeTab === "agents" && state.items.length > 0) {
+		const selected = state.items[state.selectedIndex];
+		hints.push({ key: "Space", action: selected?.enabled === false ? "enable" : "disable" });
+	}
 	if (state.activeTab === "orchestrator") {
 		hints.push({ key: "Enter", action: "select" });
 	}

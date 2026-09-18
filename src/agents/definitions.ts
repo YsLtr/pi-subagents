@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { normalizeVerifierModelRef } from "../vf/model-ref.ts";
@@ -87,6 +87,7 @@ function parseAgentDefinition(
 	path: string,
 	source: "project" | "global",
 	cwdBase: string,
+	includeDisabled = false,
 ): ResolvedAgentDefinition | null {
 	const content = readFileSync(path, "utf8");
 	const match = content.match(/^---\n([\s\S]*?)\n---/);
@@ -112,7 +113,7 @@ function parseAgentDefinition(
 		return block.join("\n").trim();
 	};
 	const enabledRaw = get("enabled");
-	if (enabledRaw === "false") return null;
+	if (enabledRaw === "false" && !includeDisabled) return null;
 	const spawningRaw = get("spawning");
 	const autoExitRaw = get("auto-exit");
 	const allowModelOverrideRaw = get("allow-model-override");
@@ -170,7 +171,8 @@ function parseAgentDefinition(
 		description: get("description"),
 		source,
 		path,
-		enabled: enabledRaw != null ? enabledRaw === "true" : undefined,
+		// Only the literal "false" disables; unrecognized values stay enabled.
+		enabled: enabledRaw === undefined ? undefined : enabledRaw !== "false",
 		model: get("model"),
 		allowedModels: get("allowed-models"),
 		allowModelOverride: allowModelOverrideRaw != null ? allowModelOverrideRaw === "true" : undefined,
@@ -353,7 +355,10 @@ function parseVisibleTo(raw: string | undefined): string[] {
 
 export type ResolveAgentCwd = (cwdHint: string | null, baseCwd: string) => string;
 
-export function getEffectiveAgentDefinitions(baseCwd = process.cwd()): ResolvedAgentDefinition[] {
+export function getEffectiveAgentDefinitions(
+	baseCwd = process.cwd(),
+	options: { includeDisabled?: boolean } = {},
+): ResolvedAgentDefinition[] {
 	const configDir = getAgentConfigDir();
 	const agents = new Map<string, ResolvedAgentDefinition>();
 	const dirs = [
@@ -373,12 +378,33 @@ export function getEffectiveAgentDefinitions(baseCwd = process.cwd()): ResolvedA
 		for (const file of readdirSync(dir)
 			.filter((entry) => entry.endsWith(".md"))
 			.sort((a, b) => a.localeCompare(b))) {
-			const definition = parseAgentDefinition(join(dir, file), source, cwdBase);
+			const definition = parseAgentDefinition(join(dir, file), source, cwdBase, options.includeDisabled === true);
 			if (!definition) continue;
 			agents.set(definition.name, definition);
 		}
 	}
 	return [...agents.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Rewrite the `enabled` frontmatter key of an agent file in place.
+ *
+ * Only the `enabled:` line changes; the rest of the file is preserved
+ * byte-for-byte, so comments, key order, and the agent body survive. The key
+ * is appended to the frontmatter block when the file does not set it yet.
+ * Node fs only — no shell, so the behavior is identical on every platform.
+ */
+export function setAgentEnabled(agentPath: string, enabled: boolean): void {
+	const content = readFileSync(agentPath, "utf8");
+	const match = content.match(/^---\n([\s\S]*?)\n---/);
+	if (!match || match.index === undefined) throw new Error(`No frontmatter block in ${agentPath}.`);
+	const value = enabled ? "true" : "false";
+	const lines = match[1].split("\n");
+	const enabledIndex = lines.findIndex((line) => /^enabled:/.test(line));
+	if (enabledIndex === -1) lines.push(`enabled: ${value}`);
+	else lines[enabledIndex] = `enabled: ${value}`;
+	const block = `---\n${lines.join("\n")}\n---`;
+	writeFileSync(agentPath, content.slice(0, match.index) + block + content.slice(match.index + match[0].length));
 }
 
 export function loadAgentDefaults(

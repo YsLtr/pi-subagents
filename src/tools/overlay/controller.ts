@@ -4,7 +4,8 @@ import type { OrchestratorController } from "../../runtime/orchestrator-controll
 import { type ResumeServiceRuntime, resumeSubagentSession } from "../../runtime/resume-service.ts";
 import { completedSubagentResults } from "../../runtime/state.ts";
 import type { RunningSubagent, SubagentResult } from "../../types.ts";
-import { buildAgentItems, buildCompletedItems, buildRunningItems } from "./data.ts";
+import { buildAgentItems } from "./agent-items.ts";
+import { buildCompletedItems, buildRunningItems } from "./data.ts";
 import {
 	getOrchestratorActions,
 	getOrchestratorGuardMessage,
@@ -195,6 +196,18 @@ export class SubagentsOverlayController implements Component {
 		if (matchesKey(data, "m") && item.canResume) {
 			this.editor.setText("");
 			this.state.view = { kind: "editor", itemIndex: this.state.selectedIndex };
+		}
+		if (matchesKey(data, Key.space) && item.canToggle && item.onToggle) {
+			try {
+				item.onToggle();
+			} catch (err) {
+				this.ctx.ui.notify(
+					`Could not update the agent file: ${err instanceof Error ? err.message : String(err)}`,
+					"error",
+				);
+			}
+			this.refreshItems();
+			return;
 		}
 	}
 

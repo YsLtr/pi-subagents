@@ -1,4 +1,4 @@
-import { type AgentDefaults, getEffectiveAgentDefinitions, loadAgentDefaults } from "../../agents/definitions.ts";
+import { type AgentDefaults, loadAgentDefaults } from "../../agents/definitions.ts";
 import { completedSubagentResults, runningSubagents } from "../../runtime/state.ts";
 import { stopRunningSubagent } from "../../runtime/wiring.ts";
 import { getEntries } from "../../session/session.ts";
@@ -19,7 +19,7 @@ import type { DetailSection, OverlayContext, OverlayItem } from "./render-types.
 
 // ─── Section building ───────────────────────────────────────────────────────
 
-type AgentDetailDefaults = AgentDefaults & {
+export type AgentDetailDefaults = AgentDefaults & {
 	name?: string;
 	description?: string;
 };
@@ -64,7 +64,10 @@ function inherited(value?: string | null): string {
 	return value && value.trim() ? value : "default";
 }
 
-function buildSections(defs: AgentDetailDefaults | null, meta?: PersistedSubagentLaunchMetadata): DetailSection[] {
+export function buildSections(
+	defs: AgentDetailDefaults | null,
+	meta?: PersistedSubagentLaunchMetadata,
+): DetailSection[] {
 	const fields: Array<{ label: string; value: string }> = [];
 	const name = meta?.name ?? defs?.name ?? "—";
 
@@ -571,29 +574,3 @@ export async function buildCompletedItems(ctx: OverlayContext): Promise<OverlayI
 	return items;
 }
 
-export function buildAgentItems(_ctx: OverlayContext): OverlayItem[] {
-	return getEffectiveAgentDefinitions().map((d) => {
-		const defs = d as AgentDetailDefaults;
-		const sections = buildSections(defs, undefined);
-		if (d.body) {
-			const bodyLines = d.body
-				.split("\n")
-				.filter((l: string) => l.trim())
-				.map((l: string) => ({ label: "", value: l }));
-			sections.push({ title: "Agent Body", fields: bodyLines });
-		}
-
-		return {
-			id: d.name,
-			icon: "◆",
-			iconColor: "accent",
-			name: d.name,
-			agent: undefined,
-			stats: [],
-			activity: d.description ? firstLine(d.description, 60) : "(no description)",
-			detailSections: sections,
-			canKill: false,
-			canResume: false,
-		};
-	});
-}

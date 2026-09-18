@@ -13,7 +13,12 @@ export function registerSubagentsView(pi: ExtensionAPI, runtime: OverlayRuntime)
 
 	async function open(ctx: ExtensionContext): Promise<SubagentsOverlayResult> {
 		if (activeOverlay || activeOverlayPromise) return null;
-		if (!runningSubagents.size && !completedSubagentResults.size && !getEffectiveAgentDefinitions().length && !runtime.orchestrator) {
+		if (
+			!runningSubagents.size &&
+			!completedSubagentResults.size &&
+			!getEffectiveAgentDefinitions(undefined, { includeDisabled: true }).length &&
+			!runtime.orchestrator
+		) {
 			ctx.ui.notify("No subagents or definitions.", "info");
 			return null;
 		}

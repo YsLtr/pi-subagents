@@ -159,7 +159,7 @@ For a fuller example of the intended style, see the [scout agent gist by edxeth]
 | --- | --- | --- |
 | `name` | filename | Stable agent name used by `agent: "..."` |
 | `description` | unset | One-line routing hint for ambient awareness |
-| `enabled` | `true` | Set `false` to hide and block the agent |
+| `enabled` | `true` | Set `false` to hide and block the agent. `Space` on the `/subagents` Agents tab flips this value in the agent file |
 | `model` | Pi default | Child default model, including optional thinking suffix. When unset, the child inherits the parent's model. |
 | `thinking` | model default | Child thinking level. When unset, the child inherits the parent's thinking level. |
 | `allow-model-override` | `true` | Whether the parent Pi session may launch or resume this agent with a different model or thinking level. Leave it alone if you want to choose models per task from the parent chat. Set `false` when this agent should always use the model written in its file. |
