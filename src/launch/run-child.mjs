@@ -1,4 +1,4 @@
-import { readFileSync, rmdirSync, unlinkSync } from "node:fs";
+import { readFileSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { spawn } from "node:child_process";
 
@@ -88,6 +88,16 @@ if (capsule.deriveZellijPaneSurface && typeof process.env.ZELLIJ_PANE_ID === "st
 	env.PI_SUBAGENT_SURFACE = `pane:${process.env.ZELLIJ_PANE_ID}`;
 }
 
+if (typeof capsule.processIdFile === "string" && capsule.processIdFile) {
+	writeFileSync(capsule.processIdFile, `${process.pid}\n`, "utf8");
+}
+const clearProcessId = () => {
+	if (typeof capsule.processIdFile !== "string" || !capsule.processIdFile) return;
+	try {
+		unlinkSync(capsule.processIdFile);
+	} catch {}
+};
+
 const child = spawn(capsule.command, capsule.args, {
 	cwd: capsule.cwd || undefined,
 	env,
@@ -99,11 +109,13 @@ for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
 }
 
 child.on("error", (error) => {
+	clearProcessId();
 	process.stderr.write(`run-child: ${error?.message ?? error}\n`);
 	process.exit(1);
 });
 
 child.on("exit", (code, signal) => {
+	clearProcessId();
 	if (signal) {
 		// Re-raise with default handlers so the launcher dies by the same signal;
 		// our forwarders would otherwise swallow the self-kill and exit 0.

@@ -1,6 +1,7 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { shellEscape } from "../mux.ts";
+import { getInteractiveProcessFile } from "../session/interactive-process.ts";
 import { getPiInvocation } from "./child-command.ts";
 import { buildParentEnvSnapshot, PANE_IDENTITY_ENV_PATTERNS, resolveDenyEnvPatterns } from "./child-env.ts";
 import { disposeEnvCapsule, writeEnvCapsule } from "./env-capsule.ts";
@@ -52,6 +53,7 @@ export function buildInteractiveShellCommand(input: InteractiveShellCommandInput
 		parentEnv: buildParentEnvSnapshot(process.env, resolveDenyEnvPatterns(input.denyEnv)),
 		overrides: input.envOverrides,
 		paneIdentityKeys: [...PANE_IDENTITY_ENV_PATTERNS],
+		processIdFile: getInteractiveProcessFile(input.doneSentinelFile),
 		...(input.deriveZellijPaneSurface ? { deriveZellijPaneSurface: true } : {}),
 	});
 	const sentinel = buildInteractiveSentinelShellCommands(input.doneSentinelFile);

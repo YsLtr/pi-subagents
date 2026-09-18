@@ -85,7 +85,7 @@ export function deliverCompletedSubagentResult(
 			details: getCompletedResultDetails(completed),
 		},
 		{ triggerTurn: true, deliverAs },
-	));
+	), deliverAs === "nextTurn");
 	return completed;
 }
 

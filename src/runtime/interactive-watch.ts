@@ -4,6 +4,7 @@ import type { PollResult } from "../mux/poll.ts";
 import { isZellijSurfaceLive } from "../mux/zellij-runtime.ts";
 import { consumeSubagentExitSignal, getMuxBackend, pollForExit } from "../mux.ts";
 import { hasSubagentExitSidecar } from "../session/exit-sidecar.ts";
+import { getInteractiveProcessFile } from "../session/interactive-process.ts";
 import { findLastSubagentOutputWithSource, getEntryCount, getNewEntries } from "../session/session.ts";
 import { writeSubagentTimeoutSidecar } from "../session/timeout-sidecar.ts";
 import type { RunningSubagent, SubagentResult, SubagentSummarySource } from "../types.ts";
@@ -450,8 +451,9 @@ function waitForPoll(interval: number, signal: AbortSignal): Promise<void> {
 }
 
 function cleanupDoneSentinel(running: RunningSubagent): void {
-	if (!running.doneSentinelFile || !existsSync(running.doneSentinelFile)) return;
+	if (!running.doneSentinelFile) return;
 	try {
 		rmSync(running.doneSentinelFile, { force: true });
+		rmSync(getInteractiveProcessFile(running.doneSentinelFile), { force: true });
 	} catch {}
 }

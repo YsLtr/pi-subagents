@@ -3,7 +3,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { registerOutstandingWorkReporting } from "../../src/runtime/work-reporting.ts";
-import { runningSubagents, resetRuntimeStateForTest } from "../../src/runtime/state.ts";
+import {
+	requestSubagentBatchStop,
+	resetSubagentBatchStopRequest,
+	runningSubagents,
+	resetRuntimeStateForTest,
+} from "../../src/runtime/state.ts";
 import { getLaunchedSubagentResult, wireSubagentSteerBack } from "../../src/runtime/running-registry.ts";
 import type { RunningSubagent, SubagentResult } from "../../src/types.ts";
 
@@ -16,9 +21,11 @@ test("async launch publishes before yielding and keeps last result outstanding u
 	resetRuntimeStateForTest(() => {});
 	const events = new Map<string, (event: unknown, ctx: ExtensionContext) => unknown>();
 	const messages: object[] = [];
+	const deliveries: Array<{ deliverAs?: string }> = [];
 	const counts: number[] = [];
 	// SAFETY: Only event registration and result delivery are used at this Pi boundary.
-	const pi = { on: (name: string, handler: (event: unknown, ctx: ExtensionContext) => unknown) => events.set(name, handler), sendMessage: (message: object) => messages.push(message) } as unknown as ExtensionAPI;
+	const pi = { on: (name: string, handler: (event: unknown, ctx: ExtensionContext) => unknown) => events.set(name, handler),
+		sendMessage: (message: object, options: { deliverAs?: string }) => { messages.push(message); deliveries.push(options); } } as unknown as ExtensionAPI;
 	// SAFETY: The reporting lifecycle only reads mode and session identity from this context.
 	const ctx = { mode: "tui", sessionManager: { getSessionFile: () => "session.jsonl" }, isIdle: () => true } as unknown as ExtensionContext;
 	const reporting = registerOutstandingWorkReporting(pi, async () => createHerdrWorkReporter(ctx,
@@ -37,6 +44,8 @@ test("async launch publishes before yielding and keeps last result outstanding u
 		}));
 	const emit = async (name: string, event = {}) => { await events.get(name)?.(event, ctx); };
 	await reporting.start(ctx);
+	const savedAutoExit = process.env.PI_SUBAGENT_AUTO_EXIT;
+	delete process.env.PI_SUBAGENT_AUTO_EXIT;
 	try {
 		let finish: ((result: SubagentResult) => void) | undefined;
 		const result = new Promise<SubagentResult>((resolve) => { finish = resolve; });
@@ -52,11 +61,13 @@ test("async launch publishes before yielding and keeps last result outstanding u
 		assert.equal(counts.at(-1), 1);
 		await emit("agent_settled");
 		assert.equal(counts.at(-1), 1);
+		resetSubagentBatchStopRequest();
 		assert.ok(finish);
 		finish({ name: running.name, task: running.task, summary: "done", exitCode: 0, elapsed: 1 });
 		await new Promise((resolve) => setImmediate(resolve));
 		assert.equal(runningSubagents.size, 0);
 		assert.equal(messages.length, 1);
+		assert.equal(deliveries.at(-1)?.deliverAs, "steer");
 		await emit("agent_settled");
 		assert.equal(counts.at(-1), 1, "queued delivery is still work");
 		await emit("context", { messages: messages.map((m: object) => ({ ...m, role: "custom" })) });
@@ -64,6 +75,8 @@ test("async launch publishes before yielding and keeps last result outstanding u
 		await emit("agent_settled");
 		assert.equal(counts.at(-1), 0);
 	} finally {
+		if (savedAutoExit === undefined) delete process.env.PI_SUBAGENT_AUTO_EXIT;
+		else process.env.PI_SUBAGENT_AUTO_EXIT = savedAutoExit;
 		await reporting.stop();
 		resetRuntimeStateForTest(() => {});
 	}
@@ -73,15 +86,16 @@ async function harness() {
 	resetRuntimeStateForTest(() => {});
 	const events = new Map<string, (event: unknown, ctx: ExtensionContext) => unknown>();
 	const messages: object[] = [];
+	const deliveries: Array<{ deliverAs?: string }> = [];
 	const counts: number[] = [];
 	// SAFETY: These are the only Pi boundary methods used by reporting and result routing.
 	const pi = { on: (name: string, handler: (event: unknown, ctx: ExtensionContext) => unknown) => events.set(name, handler),
-		sendMessage: (message: object) => messages.push(message) } as unknown as ExtensionAPI;
+		sendMessage: (message: object, options: { deliverAs?: string }) => { messages.push(message); deliveries.push(options); } } as unknown as ExtensionAPI;
 	// SAFETY: Lifecycle test context deliberately excludes unrelated UI/provider methods.
 	const ctx = { mode: "tui", sessionManager: { getSessionFile: () => "parent.jsonl" }, isIdle: () => true } as unknown as ExtensionContext;
 	const reporting = registerOutstandingWorkReporting(pi, async () => ({ publish: async (count) => { counts.push(count); }, stop: async () => {} }));
 	await reporting.start(ctx);
-	return { pi, counts, messages,
+	return { pi, counts, messages, deliveries,
 		emit: async (name: string, event = {}) => { await events.get(name)?.(event, ctx); },
 		stop: async () => { await reporting.stop(); resetRuntimeStateForTest(() => {}); },
 	};
@@ -132,6 +146,29 @@ test("awaited children and manual-close children count, foreign adopted observat
 		await h.emit("tool_result");
 		assert.equal(h.counts.at(-1), 0);
 	} finally { await h.stop(); }
+});
+
+test("a report parked for the operator's next prompt releases its lease on the settle that follows", async () => {
+	const h = await harness();
+	const savedAutoExit = process.env.PI_SUBAGENT_AUTO_EXIT;
+	delete process.env.PI_SUBAGENT_AUTO_EXIT;
+	try {
+		const running = child("parked");
+		runningSubagents.set(running.id, running);
+		await h.emit("tool_result");
+		assert.equal(h.counts.at(-1), 1);
+		requestSubagentBatchStop();
+		wireSubagentSteerBack(h.pi, running, Promise.resolve({ name: running.name, task: running.task, summary: "done", exitCode: 0, elapsed: 1 }), String, () => {});
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		assert.equal(h.deliveries.at(-1)?.deliverAs, "nextTurn");
+		assert.equal(runningSubagents.size, 0);
+		await h.emit("agent_settled");
+		assert.equal(h.counts.at(-1), 0);
+	} finally {
+		if (savedAutoExit === undefined) delete process.env.PI_SUBAGENT_AUTO_EXIT;
+		else process.env.PI_SUBAGENT_AUTO_EXIT = savedAutoExit;
+		await h.stop();
+	}
 });
 
 test("session stop detaches reporting before registry cleanup or late watcher outcomes", async () => {

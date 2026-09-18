@@ -38,6 +38,7 @@ describe("interactive shell command builder", () => {
 			assert.equal(capsule.command, fakePi);
 			assert.deepEqual(capsule.args, ["--session", "/tmp/s.jsonl", "@/tmp/task.md"]);
 			assert.equal(capsule.cwd, "/some/cwd");
+			assert.equal(capsule.processIdFile, "/tmp/done.txt.pid");
 			assert.equal(capsule.overrides.PI_SUBAGENT_NAME, "child");
 			assert.equal(capsule.overrides.SECRET_OVERRIDE, "override-secret");
 			assert.equal(capsule.parentEnv.LEAK_PROBE, "leaky-secret-value");

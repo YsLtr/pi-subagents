@@ -23,9 +23,12 @@ export interface BackgroundWatchRuntime {
 	restartForTimeoutWrapUp?(running: RunningSubagent, signal: AbortSignal): Promise<void>;
 }
 
+type ProcessProbe = Pick<NodeJS.Process, "platform" | "kill">;
+
 export interface BackgroundWatchOptions {
 	/** Grace before a timeout kill escalates to SIGKILL. Injectable for tests. */
 	timeoutKillEscalationMs?: number;
+	processProbe?: ProcessProbe;
 }
 
 type BackgroundGenerationOutcome = { kind: "restart" } | { kind: "result"; result: SubagentResult };
@@ -46,17 +49,17 @@ function terminateChildProcessGroup(running: RunningSubagent, signal: NodeJS.Sig
  * The group, not the leader: a leader can exit while the descendants it
  * spawned keep running, and those are the processes still burning the budget.
  */
-function isChildProcessGroupAlive(running: RunningSubagent): boolean {
+function isChildProcessGroupAlive(running: RunningSubagent, processProbe: ProcessProbe): boolean {
 	const pid = running.childProcess?.pid;
-	return pid ? isProcessGroupAlive(pid) : false;
+	return pid ? isProcessGroupAlive(pid, processProbe) : false;
 }
 
-function isProcessGroupAlive(pid: number): boolean {
+function isProcessGroupAlive(pid: number, processProbe: ProcessProbe): boolean {
 	try {
-		process.kill(-pid, 0);
+		processProbe.kill(processProbe.platform === "win32" ? pid : -pid, 0);
 		return true;
-	} catch {
-		return false;
+	} catch (error) {
+		return !(typeof error === "object" && error !== null && "code" in error && error.code === "ESRCH");
 	}
 }
 
@@ -64,6 +67,7 @@ async function terminateBackgroundGeneration(
 	running: RunningSubagent,
 	runtime: BackgroundWatchRuntime,
 	escalationMs: number,
+	processProbe: ProcessProbe,
 ): Promise<void> {
 	const pid = running.childProcess?.pid;
 	runtime.terminateBackgroundChildProcess(running, "SIGTERM");
@@ -71,14 +75,14 @@ async function terminateBackgroundGeneration(
 	const escalationAt = Date.now() + escalationMs;
 	const giveUpAt = escalationAt + 1000;
 	let escalated = false;
-	while (isProcessGroupAlive(pid) && Date.now() < giveUpAt) {
+	while (isProcessGroupAlive(pid, processProbe) && Date.now() < giveUpAt) {
 		if (!escalated && Date.now() >= escalationAt) {
 			escalated = true;
 			runtime.terminateBackgroundChildProcess(running, "SIGKILL");
 		}
 		await new Promise((resolve) => setTimeout(resolve, 25));
 	}
-	if (isProcessGroupAlive(pid)) running.timeoutKillFailed = true;
+	if (isProcessGroupAlive(pid, processProbe)) running.timeoutKillFailed = true;
 }
 
 function buildBackgroundRestartTimeoutResult(
@@ -151,6 +155,7 @@ async function watchBackgroundSubagentUntilFinal(
 							current,
 							runtime,
 							options.timeoutKillEscalationMs ?? TIMEOUT_KILL_ESCALATION_MS,
+							options.processProbe ?? process,
 						),
 				});
 				if (restart.kind === "cancelled") return buildBackgroundCancellationResult(running);
@@ -188,6 +193,7 @@ function watchBackgroundGeneration(
 	const processGroupPid = child.pid;
 	const terminalGraceMs = 1000;
 	const killEscalationMs = options.timeoutKillEscalationMs ?? TIMEOUT_KILL_ESCALATION_MS;
+	const processProbe = options.processProbe ?? process;
 
 	return new Promise((resolve) => {
 		let settled = false;
@@ -220,7 +226,7 @@ function watchBackgroundGeneration(
 			if (!running.timeoutKillTimer) {
 				running.timeoutKillTimer = setTimeout(() => {
 					running.timeoutKillTimer = undefined;
-					if (settled || !processGroupPid || !isProcessGroupAlive(processGroupPid)) return;
+					if (settled || !processGroupPid || !isProcessGroupAlive(processGroupPid, processProbe)) return;
 					runtime.terminateBackgroundChildProcess(running, "SIGKILL");
 				}, killEscalationMs);
 				running.timeoutKillTimer.unref?.();
@@ -297,6 +303,13 @@ function watchBackgroundGeneration(
 			const sessionReadable = observeSession(now);
 			checkTimeoutDeadlines(now);
 			armDeadlineTimer();
+			if (processGroupPid && !isChildProcessGroupAlive(running, processProbe)) {
+				// The exit handler already consumed the sidecar; let its group waiter
+				// finalize the captured result instead of consuming it a second time.
+				if (groupExitPoll) return;
+				finalizeExit(child.exitCode, consumeSubagentExitSignal(running.sessionFile));
+				return;
+			}
 			if (running.timeoutExpiry || (running.timeoutWrapUp && !running.timeoutWrapUpMode)) return;
 			if (!sessionReadable) return;
 			try {
@@ -322,7 +335,7 @@ function watchBackgroundGeneration(
 		const onAbort = () => {
 			terminateChildProcessGroup(running, "SIGTERM");
 			setTimeout(() => {
-				if (processGroupPid && isProcessGroupAlive(processGroupPid)) {
+				if (processGroupPid && isProcessGroupAlive(processGroupPid, processProbe)) {
 					terminateChildProcessGroup(running, "SIGKILL");
 				}
 			}, 5000);
@@ -413,10 +426,10 @@ function watchBackgroundGeneration(
 				Boolean(running.timeoutExpiry) ||
 				Boolean(running.timeoutWrapUp && !running.timeoutWrapUpMode) ||
 				signal.aborted;
-			if (runtimeOwnsExit && processGroupPid && isProcessGroupAlive(processGroupPid)) {
+			if (runtimeOwnsExit && processGroupPid && isProcessGroupAlive(processGroupPid, processProbe)) {
 				if (!groupExitPoll) {
 					groupExitPoll = setInterval(() => {
-						if (isProcessGroupAlive(processGroupPid)) return;
+						if (isProcessGroupAlive(processGroupPid, processProbe)) return;
 						clearInterval(groupExitPoll!);
 						groupExitPoll = undefined;
 						finalizeExit(code, exitSignal);

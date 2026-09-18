@@ -59,21 +59,33 @@ describe("run-child launcher", () => {
 	});
 
 	it("derives PI_SUBAGENT_SURFACE from the child pane when asked", () => {
-		const outFile = join(createTestDir(), "env.json");
+		const dir = createTestDir();
+		const outFile = join(dir, "env.json");
+		const processIdFile = join(dir, "launcher.pid");
 		const { result, root } = runLauncher(
 			{
-				...envDumpCommand(outFile),
+				command: process.execPath,
+				args: [
+					"-e",
+					"const fs=require('node:fs'); fs.writeFileSync(process.argv[1], JSON.stringify({ env: process.env, launcherPid: fs.readFileSync(process.argv[2], 'utf8') }))",
+					outFile,
+					processIdFile,
+				],
 				parentEnv: {},
 				overrides: {},
 				paneIdentityKeys: [...PANE_IDENTITY_ENV_PATTERNS],
+				processIdFile,
 				deriveZellijPaneSurface: true,
 			},
 			{ ZELLIJ_PANE_ID: "42", PATH: process.env.PATH ?? "/usr/bin" },
 		);
 
 		assert.equal(result.status, 0, result.stderr);
-		const childEnv = JSON.parse(readFileSync(outFile, "utf8"));
-		assert.equal(childEnv.PI_SUBAGENT_SURFACE, "pane:42");
+		const observed = JSON.parse(readFileSync(outFile, "utf8"));
+		assert.equal(observed.env.PI_SUBAGENT_SURFACE, "pane:42");
+		assert.match(observed.launcherPid, /^\d+\n$/);
+		assert.equal(existsSync(processIdFile), false);
+		rmSync(dir, { recursive: true, force: true });
 		rmSync(root, { recursive: true, force: true });
 	});
 

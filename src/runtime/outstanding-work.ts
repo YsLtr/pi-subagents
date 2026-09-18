@@ -23,15 +23,16 @@ class OutstandingWork {
 		return ids.size;
 	}
 
-	/** Keep a queued report live until Pi has consumed it and settled, not merely enqueued it. */
-	delivery(id: string, send: () => void): void {
+	delivery(id: string, send: () => void, consumedOnDelivery = false): void {
 		// No consumer means no reporting state to retain (headless/non-Herdr).
 		if (!this.listener) { send(); return; }
 		this.pending.add(id);
-		this.consumed.delete(id);
+		if (consumedOnDelivery) this.consumed.add(id);
+		else this.consumed.delete(id);
 		this.listener();
 		try { send(); } catch (error) {
 			this.pending.delete(id);
+			this.consumed.delete(id);
 			this.listener?.();
 			throw error;
 		}

@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { clearSubagentExitSidecar, getSubagentExitSidecarPath } from "../session/exit-sidecar.ts";
+import { getInteractiveProcessFile } from "../session/interactive-process.ts";
 import { readScreenAsync } from "./io.ts";
 
 export interface PollResult {
@@ -111,11 +112,49 @@ async function waitForNextPoll(interval: number, signal: AbortSignal) {
 	});
 }
 
+function hasErrorCode(error: unknown, code: string): boolean {
+	return typeof error === "object" && error !== null && "code" in error && error.code === code;
+}
+
 function readDoneSentinel(doneSentinelFile: string): PollResult | null {
 	if (!existsSync(doneSentinelFile)) return null;
-	const fileText = readFileSync(doneSentinelFile, "utf8");
+	let fileText: string;
+	try {
+		fileText = readFileSync(doneSentinelFile, "utf8");
+	} catch (error) {
+		if (hasErrorCode(error, "ENOENT")) return null;
+		throw error;
+	}
 	const fileMatch = fileText.match(/__SUBAGENT_DONE_(\d+)__/);
 	return fileMatch ? { reason: "sentinel", exitCode: parseInt(fileMatch[1], 10) } : null;
+}
+
+function readInteractiveProcessId(processIdFile: string): number | null {
+	if (!existsSync(processIdFile)) return null;
+	try {
+		const pid = Number(readFileSync(processIdFile, "utf8").trim());
+		return Number.isInteger(pid) && pid > 0 ? pid : null;
+	} catch (error) {
+		if (hasErrorCode(error, "ENOENT")) return null;
+		throw error;
+	}
+}
+
+function hasInteractiveProcessExited(doneSentinelFile: string): boolean {
+	const processIdFile = getInteractiveProcessFile(doneSentinelFile);
+	const pid = readInteractiveProcessId(processIdFile);
+	if (pid === null) return false;
+	try {
+		process.kill(pid, 0);
+		return false;
+	} catch (error) {
+		// Only ESRCH proves that the launcher is absent. Permission and unknown
+		// probe failures leave the child supervised.
+		if (!hasErrorCode(error, "ESRCH")) return false;
+		// Normal launcher completion removes the marker before the shell publishes
+		// its sentinel. Re-read it so that transition does not look abrupt.
+		return readInteractiveProcessId(processIdFile) === pid;
+	}
 }
 
 export async function pollForExit(
@@ -143,6 +182,13 @@ export async function pollForExit(
 		if (options.doneSentinelFile) {
 			const sentinel = readDoneSentinel(options.doneSentinelFile);
 			if (sentinel) return sentinel;
+			if (hasInteractiveProcessExited(options.doneSentinelFile)) {
+				return {
+					reason: "error",
+					exitCode: 1,
+					errorMessage: "Interactive child process exited without a completion signal.",
+				};
+			}
 		}
 
 		try {
