@@ -7,6 +7,7 @@ import { getPiInvocation, getSubagentChildProcessEnv } from "../launch/child-com
 import { resolveDenyEnvPatterns } from "../launch/child-env.ts";
 import { CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT } from "../launch/context-boundary.ts";
 import { parseEnvString } from "../launch/env.ts";
+import { resolveChildDetached } from "../launch/policy.ts";
 import {
 	getExtensionLaunchArgs,
 	getPersistedPromptLaunchArgs,
@@ -168,7 +169,7 @@ export async function restartSubagentForTimeoutWrapUp(
 		throwIfAborted(signal);
 		const child = spawn(invocation.command, invocation.args, {
 			...(launch.cwd ? { cwd: launch.cwd } : {}),
-			detached: true,
+			detached: resolveChildDetached(),
 			windowsHide: true,
 			stdio:
 				running.parentClosePolicy === "continue"

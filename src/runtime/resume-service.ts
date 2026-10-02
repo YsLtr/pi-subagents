@@ -11,7 +11,7 @@ import { resolveDenyEnvPatterns } from "../launch/child-env.ts";
 import { CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT } from "../launch/context-boundary.ts";
 import { parseEnvString } from "../launch/env.ts";
 import { getSkillVisibilitySpec, PI_SUBAGENT_SKILL_VISIBILITY } from "../launch/skill-visibility.ts";
-import { resolveSubagentTimeoutState } from "../launch/policy.ts";
+import { resolveChildDetached, resolveSubagentTimeoutState } from "../launch/policy.ts";
 import {
 	getExtensionLaunchArgs,
 	getPersistedPromptLaunchArgs,
@@ -470,7 +470,7 @@ async function resumeSubagentSessionWithoutWidth(
 		]);
 		const child = spawn(invocation.command, invocation.args, {
 			...(resumeCwd ? { cwd: resumeCwd } : {}),
-			detached: true,
+			detached: resolveChildDetached(),
 			windowsHide: true,
 			stdio:
 				running.parentClosePolicy === "continue"

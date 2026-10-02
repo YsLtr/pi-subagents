@@ -134,6 +134,24 @@ export function resolveSubagentParentClosePolicy(agentDefs: AgentDefaults | null
 	return agentDefs?.parentClosePolicy ?? "terminate";
 }
 
+/**
+ * Whether a launched child must be spawned with `detached: true`.
+ *
+ * Not on Windows. `detached: true` there means DETACHED_PROCESS, which leaves the
+ * child with *no console at all*. Windows then allocates a fresh console for every
+ * native console application that child runs (git, rtk, node CLIs), and with Windows
+ * Terminal as the default terminal application each one opens a visible new tab —
+ * the "subagent keeps popping up windows" symptom. pi's own bash tool avoids this
+ * with `detached: process.platform !== "win32"`.
+ *
+ * Set PI_SUBAGENT_WIN_DETACHED=1 to restore the old behavior (the child then survives
+ * a closing parent console, at the cost of the popups).
+ */
+export function resolveChildDetached(platform: NodeJS.Platform = process.platform): boolean {
+	if (platform !== "win32") return true;
+	return process.env.PI_SUBAGENT_WIN_DETACHED === "1";
+}
+
 function isSchemeLikePath(value: string): boolean {
 	return /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(value) && !/^[a-zA-Z]:[\\/]/.test(value);
 }

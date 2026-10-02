@@ -13,6 +13,7 @@ import { CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT } from "./context-boundary.ts";
 import { coordinateSubagentLaunch } from "./launch-coordinator.ts";
 import { PI_SUBAGENT_TIMEOUT_STARTED_AT } from "../tools/timeout-reminders.ts";
 import {
+	resolveChildDetached,
 	resolveSubagentNoContextFiles,
 	resolveSubagentParentClosePolicy,
 	resolveSubagentReportContextUsage,
@@ -148,7 +149,7 @@ export async function launchBackgroundSubagent(
 	clearSubagentExitSidecar(prepared.subagentSessionFile);
 	const child = spawn(invocation.command, invocation.args, {
 		cwd: launch.forcedCwd ?? prepared.runtimePaths.effectiveCwd ?? ctx.cwd,
-		detached: true,
+		detached: resolveChildDetached(),
 		windowsHide: true,
 		stdio:
 			resolveSubagentParentClosePolicy(prepared.agentDefs) === "continue"
